@@ -1,0 +1,52 @@
+name = "three-tier"
+
+vpc_cidr = "10.0.0.0/16"
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b"
+]
+
+public_subnet_cidrs = [
+  "10.0.1.0/24",
+  "10.0.2.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.0.11.0/24",
+  "10.0.12.0/24"
+]
+
+enable_nat_gateway = true
+
+# Replace with an AMI available in your selected AWS region.
+ami_id        = "ami-xxxxxxxxxxxxxxxxx"
+instance_type = "t3.micro"
+
+# Existing EC2 key pair name.
+key_name = "my-keypair"
+
+# Restrict SSH to your own public IP.
+ssh_allowed_cidrs = ["YOUR_PUBLIC_IP/32"]
+
+# Optional web-server bootstrap.
+user_data = <<-EOF
+#!/bin/bash
+apt-get update -y || true
+apt-get install -y nginx || true
+systemctl enable nginx || true
+systemctl start nginx || true
+EOF
+
+# RDS
+# Do not commit real credentials to Git.
+db_engine         = "postgres"
+db_name           = "appdb"
+db_username       = "admin"
+db_password       = "CHANGE_ME"
+db_port           = 5432
+db_instance_class = "db.t3.micro"
+
+db_allocated_storage       = 20
+db_backup_retention_period = 7
+db_multi_az                = false
