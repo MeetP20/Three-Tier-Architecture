@@ -1,33 +1,39 @@
 # AWS Three-Tier Architecture with Terraform
 
-A modular Terraform project that provisions a **three-tier AWS architecture** with reusable modules for networking, a public EC2 web tier, and a private PostgreSQL RDS database tier.
+A modular Terraform project that provisions the **networking foundation for a three-tier AWS architecture**, including a public EC2 web tier and a private PostgreSQL RDS database tier.
 
-The project demonstrates Infrastructure as Code, reusable Terraform modules, public/private subnet isolation, NAT Gateway based egress, and security-group based application-to-database access.
+The project demonstrates reusable Terraform modules, public/private subnet isolation, Internet Gateway routing, and security-group based EC2-to-RDS access.
 
 ## Architecture
 
 ```text
-                           Internet
-                              │
-                              ▼
-                       Internet Gateway
-                              │
-              ┌───────────────┴───────────────┐
-              │                               │
-        Public Subnet A                 Public Subnet B
-              │                               │
-           EC2 Web                      NAT Gateway
-              │                               │
-              │                         Private Subnet B
-              │                               │
-              │                          RDS Subnet
-              │                               │
-              └─────── PostgreSQL ───────────┘
-                              │
-                         Private RDS
+                         Internet
+                            │
+                            ▼
+                    Internet Gateway
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+        Public Subnet A             Public Subnet B
+              │                           │
+           EC2 Web                  Reserved for
+              │                    future web tier
+              │
+              │ TCP 5432
+              ▼
+        ┌──────────────────────────────────┐
+        │         Private Subnets          │
+        │                                  │
+        │       RDS Subnet Group           │
+        │              │                   │
+        │              ▼                   │
+        │      PostgreSQL RDS              │
+        └──────────────────────────────────┘
 ```
 
-The Terraform configuration creates two Availability Zones by default. Public subnets host internet-facing compute, while RDS is placed in private subnets through an RDS subnet group.
+The architecture uses two Availability Zones for the subnet layout. The EC2 instance is deployed in a public subnet, while RDS is deployed into private subnets and is **not publicly accessible**.
+
+> **NAT Gateway is not required for the current workload.** RDS does not need NAT to communicate with EC2. NAT is only needed when a private resource requires outbound Internet access. It can be added later when a private application tier is introduced.
 
 ## Terraform Modules
 
@@ -64,9 +70,9 @@ Creates:
 - Public subnets
 - Private subnets
 - Internet Gateway
-- NAT Gateways
 - Public and private route tables
 - Route table associations
+- Optional NAT Gateway support for future private workloads
 
 ### EC2 Module
 
@@ -89,9 +95,9 @@ Creates a PostgreSQL RDS instance in private subnets with:
 - Automated backup retention
 - Optional Multi-AZ deployment
 
-## Security Model
+## Network and Security Model
 
-The database is intentionally not exposed to the public internet:
+The current application-to-database flow is entirely inside the VPC:
 
 ```text
 Internet
@@ -104,13 +110,37 @@ Public EC2
 Private RDS
 ```
 
-The RDS security group permits PostgreSQL traffic only from the EC2 security group. RDS is configured with:
+The RDS security group permits PostgreSQL traffic **only from the EC2 security group**.
+
+RDS is configured as:
 
 ```hcl
 publicly_accessible = false
 ```
 
+This means the database does not have a public endpoint accessible directly from the Internet.
+
 SSH access to EC2 should also be restricted to your own IP address rather than opening port 22 to the world.
+
+## Why NAT Gateway Is Optional
+
+NAT Gateway is deliberately **not required by the current architecture**.
+
+RDS does not need Internet access to receive database connections from EC2. The EC2-to-RDS connection uses private VPC networking and security groups.
+
+NAT becomes useful when private resources need outbound Internet access, for example:
+
+```text
+Private Application EC2
+          │
+          ▼
+     NAT Gateway
+          │
+          ▼
+       Internet
+```
+
+A future version of this project can add a private application tier and enable NAT for that tier.
 
 ## Prerequisites
 
@@ -118,7 +148,7 @@ Install:
 
 - Terraform >= 1.6
 - AWS CLI
-- An AWS account with permissions to create VPC, EC2, NAT Gateway, IAM-related and RDS resources
+- An AWS account with permissions to create VPC, EC2 and RDS resources
 
 Verify AWS authentication:
 
@@ -126,7 +156,7 @@ Verify AWS authentication:
 aws sts get-caller-identity
 ```
 
-The AWS provider uses the standard AWS credential chain. Do not hard-code AWS access keys in Terraform files.
+The AWS provider uses the standard AWS credential chain. **Do not hard-code AWS access keys in Terraform files.**
 
 ## Configuration
 
@@ -146,7 +176,7 @@ Update at minimum:
 
 Do not commit `terraform.tfvars` or real database credentials.
 
-The example uses:
+Example architecture values:
 
 ```text
 VPC:             10.0.0.0/16
@@ -154,6 +184,7 @@ Public subnets:  10.0.1.0/24, 10.0.2.0/24
 Private subnets: 10.0.11.0/24, 10.0.12.0/24
 EC2:             t3.micro
 RDS:             PostgreSQL / db.t3.micro
+NAT:             Disabled for the current workload
 ```
 
 ## Deployment
@@ -213,26 +244,28 @@ Destroy all resources when finished:
 terraform destroy
 ```
 
-> NAT Gateways and RDS can incur AWS charges. Destroy the environment when it is no longer required.
+> RDS can incur AWS charges. Review the Terraform plan carefully before destroying production resources.
 
 ## Why Modules?
 
-The infrastructure is intentionally split into reusable modules instead of keeping all resources in the root configuration.
+The infrastructure is split into reusable modules instead of keeping all resources in the root configuration.
 
 This makes the project easier to:
 
 - Reuse across environments
 - Change networking independently from compute and database resources
 - Pass outputs between infrastructure layers
-- Maintain and test individual infrastructure components
+- Maintain individual infrastructure components
 - Extend with additional modules such as ALB, Auto Scaling, IAM or monitoring
 
 ## Future Improvements
 
 - Add an Application Load Balancer in front of EC2
 - Add an Auto Scaling Group for the web tier
+- Add a private application tier
+- Enable NAT Gateway when private workloads require outbound Internet access
 - Add separate security groups for web, application and database tiers
-- Enable RDS Multi-AZ by default for production environments
+- Enable RDS Multi-AZ for production environments
 - Add VPC endpoints
 - Add CloudWatch monitoring and alarms
 - Add remote Terraform state with S3
@@ -241,11 +274,11 @@ This makes the project easier to:
 
 ## Skills Demonstrated
 
-**AWS:** VPC, EC2, RDS, Internet Gateway, NAT Gateway, Security Groups
+**AWS:** VPC, EC2, RDS, Internet Gateway, Security Groups, subnet and routing design
 
-**Terraform:** Modules, variables, outputs, resource dependencies, Infrastructure as Code
+**Terraform:** Reusable modules, variables, outputs, resource dependencies, Infrastructure as Code
 
-**Networking:** Public/private subnet design, routing, NAT, security-group based access control
+**Networking:** Public/private subnet design, routing, VPC connectivity, security-group based access control
 
 ## License
 
